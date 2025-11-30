@@ -1,0 +1,788 @@
+---
+title: 'WDLPS-RT Project'
+author: "Josh Jolissaint"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 5
+    toc_float: yes
+  pdf_document:
+    toc: no
+    toc_depth: '5'
+---
+
+```{r setup, include = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(tidyverse)
+library(survival)
+library(survminer)
+library(gtsummary)
+library(tidycmprsk)
+library(ggsurvfit)
+
+load("~/Desktop/WDLPS_RT/WDLPS.rda")
+#or for one drive
+#load("G:/WD_RT/WDLPS.rda")
+load("~/Desktop/WDLPS_RT/RT.rda")
+#load("G:/WD_RT/RT.rda")
+
+```
+
+```{r, include = FALSE, echo = FALSE}
+table(WDLPS$keep) 
+WDLPS <- subset(WDLPS, keep == 1) #N=1 who's recurrence time was before the surgery time, N=1 with unknown LR vs. DR, N=1 with same problem excluded earlier 
+```
+
+```{r}
+#individual hospital contributions
+table(WDLPS$hosp1)
+```
+# Unmatched Analyses
+
+## RT dosing
+
+```{r, echo = FALSE}
+#median RT dose for RT population
+#range 25-60.2
+summary(RT$neo_dose)
+
+```
+
+## Univariate analysis for recurrence 
+
+```{r, echo = FALSE}
+table(WDLPS$recur_type1)
+
+#Table comparing demographics between recurrence
+WDLPS %>%
+  select(age_years, Gender1, focal1, size, resect1, recur1_table, neo_rad1) %>%
+  tbl_summary(by = recur1_table,
+              digits = list(all_continuous() ~ 2,
+                            all_categorical() ~ 1),
+              label = list(age_years ~ "Age",
+                           Gender1 ~ "Gender",
+                           focal1 ~ "Multifocality",
+                           size ~ "Tumor Size",
+                           resect1 ~ "Complete Resection",
+                           neo_rad1 ~ "Neoadjuvant RT")) %>%
+  add_p(pvalue_fun = ~style_pvalue(.x, digits = 3)) %>%
+  add_overall() %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_spanning_header(c("stat_1", "stat_2") ~ "**Recurrence**")
+```
+
+## Univariate analysis for local recurrence only
+
+```{r}
+#Table comparing demographics between recurrence
+WDLPS %>%
+  select(age_years, Gender1, focal1, size, resect1, LR_only, neo_rad1) %>%
+  tbl_summary(by = LR_only,
+              digits = list(all_continuous() ~ 2,
+                            all_categorical() ~ 1),
+              label = list(age_years ~ "Age",
+                           Gender1 ~ "Gender",
+                           focal1 ~ "Multifocality",
+                           size ~ "Tumor Size",
+                           resect1 ~ "Complete Resection",
+                           neo_rad1 ~ "Neoadjuvant RT")) %>%
+  add_p(pvalue_fun = ~style_pvalue(.x, digits = 3)) %>%
+  add_overall() %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_spanning_header(c("stat_1", "stat_2") ~ "**Recurrence**")
+```
+
+
+## Multivariate logistic regression for recurrence
+
+```{r, echo = FALSE}
+#logistic regression by demographics
+m1 <- glm(recur1 ~ age_years + Gender1_table + focal1 + size + resect1 + neo_rad1, data = WDLPS, family = "binomial")
+
+m1 %>%
+  tbl_regression(exponentiate = TRUE,
+                 label = list(age_years ~ "Age",
+                              Gender1_table ~ 'Gender',
+                              focal1 ~"Multifocal",
+                              neo_rad1 ~ "Neoadjuvant RT",
+                              size ~ "Size",
+                              resect1 ~ "Complete Resection")) %>%
+  as_gt()
+```
+
+## Univariate Cox Model, neoadjuvant RT as predictor
+```{r, echo = FALSE}
+m2 <- coxph(Surv(os_time_mo, vital_num) ~ neo_rad1, data = WDLPS)
+
+m2 %>%
+  tbl_regression(exponentiate = TRUE,
+                 label = neo_rad1 ~ "Neoadjuvant RT") %>%
+  as_gt()
+```
+
+## Multivariable Cox model
+```{r, echo = FALSE}
+m3 <- coxph(Surv(os_time_mo, vital_num) ~ neo_rad1 + age_years + Gender1_table + focal1 + size + resect1 + neo_rad1, data = WDLPS)
+
+
+m3 %>%
+  tbl_regression(exponentiate = TRUE,
+                 label = list(age_years ~ "Age",
+                              Gender1_table ~ 'Gender',
+                              focal1 ~"Multifocal",
+                              neo_rad1 ~ "Neoadjuvant RT",
+                              size ~ "Size",
+                              resect1 ~ "Complete Resection")) %>%
+  as_gt()
+
+```
+
+## Univariate comparison of demographics by receipt neoadjuvant RT
+```{r, echo = FALSE}
+WDLPS %>%
+  select(age_years, Gender1_table, focal1, size, resect1, LR_only, neo_rad1) %>%
+  tbl_summary(by = neo_rad1,
+              digits = list(all_continuous() ~ 2,
+                            all_categorical() ~ 1),
+              label = list(age_years ~ "Age",
+                           Gender1_table ~ "Gender",
+                           focal1 ~ "Multifocality",
+                           size ~ "Tumor Size",
+                           resect1 ~ "Complete Resection",
+                           LR_only ~ "LR")) %>%
+  add_p(pvalue_fun = ~style_pvalue(.x, digits = 3)) %>%
+  add_overall() %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_spanning_header(c("stat_1", "stat_2") ~ "**Neoadjuvant RT**")
+
+
+```
+
+## Unmatched Kaplan Meier models
+```{r, include = FALSE, echo = FALSE}
+#kaplan meier object
+km <- survfit(Surv(os_time_mo, vital_num) ~ neo_rad1_table, data = WDLPS)
+
+summary(km, times = (0:120)*12)
+```
+
+```{r}
+#display median OS (which was not reached)
+print(km)
+
+#median f/u time
+print(follow_up_time <- median(km$time))
+```
+
+### 5- and 10-year survival
+```{r, echo = FALSE}
+#5 and 10-year survival
+km %>%
+  tbl_survfit(
+    times = c(60, 120),
+    label = "Neoadjuvant RT"
+  ) %>%
+  add_p()
+```
+
+### Unmatched KM curve
+```{r, echo = FALSE}
+#plotted Kaplan meier
+#truncated to 120months, no one in the RT group with that much f/u
+ggsurvplot(km,
+           legend.labs = c("Surgery alone", "Neoadjuvant radiotherapy"),
+           pval = TRUE,
+           pval.size = 3,
+           risk.table = "nrisk_cumcensor",
+           risk.table.title = "Number at Risk (Censored)",
+           fontsize = 3,
+           surv.scale = 'percent',
+           xlim = c(0,120),
+           break.x.by = 24,
+           xlab = "Time since surgery (Months)",
+           ylab = "Overall Survival",
+           legend.title = '',
+           ggtheme = theme_classic2(base_size=12, base_family = "Arial"),
+           font.family = "Arial",
+           tables.theme = clean_theme() + 
+             theme(plot.title = element_text(size = 8)))
+
+```
+
+## Cumulative incidence of recurrence (any)
+
+```{r, include = FALSE, echo=FALSE}
+WDLPS <- WDLPS %>%
+  mutate(
+    vital_factor = as.factor(vital_CCI) #0=alive without recurrence, 1=LR or both LR/DR, 2= death
+  ) #convert vital status into a factor variable with recurrence (y/n)
+
+WDLPS <- WDLPS %>%
+  mutate(
+    vital_factor_2 = as.factor(vital_CCI_2) # 0=alive without recurrence, 1=local, 2=death, 3=distant
+  ) #vital status 2 into factor (separate LR, DR, death)
+
+#create recurrence time
+WDLPS <- WDLPS %>% 
+  mutate(
+    os_time_CCI = 
+      as.numeric((
+        difftime(date_CCI, 
+                 dos,
+                 units = "days")) / 365.25)*12)
+
+cuminc(Surv(os_time_CCI, vital_factor) ~ 1, data = WDLPS)
+
+```
+
+```{r, echo = FALSE}
+cuminc(Surv(os_time_CCI, vital_factor) ~ 1, data = WDLPS) %>% 
+  ggcuminc() + 
+  labs(
+    x = "Months"
+  ) + 
+  add_risktable() +
+  scale_x_continuous(breaks = seq(0,120, by = 12),
+                     limits = c(0,120))
+```
+
+## Competing risk of first recurrence as locoregional with distant recurrence and death as competing risks
+
+### 5 and 8-year cumulative incidence (CCI) of recurrence
+```{r, echo = FALSE}
+cuminc(Surv(os_time_CCI, vital_factor_2) ~ neo_rad1_table, data = WDLPS) %>%
+  tbl_cuminc(
+    times = c(60,96),
+    label = "Neoadjuvant RT"
+  ) %>%
+  add_p()
+```
+
+### Unmatched CCI of LR recurrence
+```{r, echo = FALSE}
+WDLPS <- WDLPS %>%
+  mutate(
+    neo_rad1_table = recode(
+      neo_rad1,
+      '0' = 'Surgery alone',
+      '1' = 'Neoadjuvant radiotherapy'))
+
+cuminc(Surv(os_time_CCI, vital_factor_2) ~ neo_rad1_table, data = WDLPS) %>% 
+  ggcuminc(outcome = "1") + 
+  labs(
+    x = "Time since surgery (months)",
+    y = "Cumulative incidence of local recurrence (%)"
+  ) + 
+  theme(panel.grid = element_blank()) +
+  add_censor_mark() +
+  scale_y_continuous(limits = c(0, 0.75), labels = scales::percent,  expand = c(0.01,0)) +
+  add_risktable(
+    risktable_stats = "{n.risk} ({n.censor})",
+    stats_label = c("Number at Risk (Censored)")
+  ) +
+  scale_x_continuous(breaks = seq(0,120, by = 24),
+                     limits = c(0,120)) +
+  scale_y_continuous(breaks = seq(0,0.6, by = 0.1),
+                     limits = c(0,0.6))
+```
+
+# 1:1 Propensity Score Matched Data
+```{r, include=FALSE, echo=FALSE}
+#load necessary packages
+library(MatchIt)
+library(lmtest)
+library(sandwich)
+
+#use matchit function to match based on neoadjuvant RT (neo_rad1), 1:1 matching, based on age (age), gender (Gender1), size (size), multifocal disease (focal1), complete macroscopic resection (resect1)
+```
+
+## For methods section
+```{r}
+sum(is.na(WDLPS$size)) #6 with NA for size
+WDLPS2 <- WDLPS %>% #need to remove any NAs from the size category to allow for PSM
+  drop_na(size)
+
+table(WDLPS2$loc) #76 with OSH location
+WDLPS2 <- subset(WDLPS2, loc == 1)
+
+table(WDLPS2$loc) #drops down to 500 cases
+
+WDLPS2 <- WDLPS2 %>%
+  rename("Age" = "age",
+         "Gender" = "Gender1",
+         "Size" = "size",
+         "Multifocal" = "focal1",
+         "Complete_Resection" = "resect1")
+
+
+
+```
+
+### Std. mean differences of matched data (Supplementary Table 1)
+```{r, echo=FALSE}
+#create matched object 
+match_obj <- matchit(neo_rad1 ~ Age + Gender + Size + Multifocal + Complete_Resection,
+  data = WDLPS2, 
+  method = "nearest", 
+  distance ="glm", #indicating we're using logistic regression to estimate the propensity score
+  ratio = 1,
+  replace = FALSE,
+  caliper = 0.2)
+summary(match_obj)
+
+matched_data <- match.data(match_obj) #create dataset from the matched object
+```
+
+## Logistic regression model using cluster-robust variances
+```{r}
+#Run regression model with recurrence as the outcome, and preoperative radiation as the only predictor
+
+#matched participants have a weight of 1
+m4 <- glm(LR_only ~ neo_rad1, data = matched_data, weights = weights)
+
+#Test the coefficient using cluster robust standard error
+coeftest(m4, vcov. = vcovCL, cluster = ~subclass)
+
+#Calculate the confidence intervals based on cluster robust standard error
+coefci(m4, vcov. = vcovCL, cluster = ~subclass, level = 0.95)
+
+m4 %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  as_gt()
+```
+
+
+## Plots of the PSM matching (Supplementary Figure 1 & 2, Table 2)
+```{r, echo=FALSE}
+plot(match_obj, type = "jitter", interactive = FALSE)
+
+plot(summary(match_obj), abs = FALSE)
+
+#Univariate table looking at PSM balancing
+matched_data %>%
+  select(age_years, Gender1_table, Multifocal, Size, Complete_Resection, LR_only, neo_rad1) %>%
+  tbl_summary(by = neo_rad1,
+              digits = list(all_continuous() ~ 2,
+                            all_categorical() ~ 1),
+              label = list(age_years ~ "Age",
+                           Gender1_table ~ "Gender",
+                           Multifocal ~ "Multifocality",
+                           Size ~ "Tumor Size (cm)",
+                           Complete_Resection ~ "Macroscopic Resection",
+                           LR_only ~ "LR")) %>%
+  add_p(pvalue_fun = ~style_pvalue(.x, digits = 3)) %>%
+  add_overall() %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_spanning_header(c("stat_1", "stat_2") ~ "**Neoadjuvant RT**")
+```
+```{r}
+#Figure Text: Jitter Plot demonstrating individual propensity scores for matched and unmatched patients.  
+
+#Figure Text: Love Plot with standard mean differences (SMDs) of each covariate after propensity score matching (PSM)
+```
+
+## Propensity-Score Matched Kaplan Meier Models
+```{r, include = FALSE, echo=FALSE}
+#kaplan meier object, renamed as km2, using matched data
+km2 <- survfit(Surv(os_time_mo, vital_num) ~ neo_rad1_table, data = matched_data)
+```
+
+```{r}
+#display median OS (which was not reached)
+print(km2)
+
+#median f/u time
+print(follow_up_time2 <- median(km2$time))
+```
+
+### 5- and 10-year survival
+```{r, echo=FALSE}
+#5 and 10-year survival
+km2 %>%
+  tbl_survfit(
+    times = c(60, 120),
+    label = "Neoadjuvant RT"
+  ) %>%
+  add_p()
+```
+
+### Kaplan Meier plots
+```{r, echo=FALSE}
+#plotted Kaplan meier
+ggsurvplot(km2,
+           legend.labs = c("Surgery alone", "Neoadjuvant radiotherapy"),
+           pval = TRUE,
+           pval.size = 3,
+           risk.table = "nrisk_cumcensor",
+           risk.table.title = "Number at Risk (Censored)",
+           fontsize = 3,
+           surv.scale = 'percent',
+           xlim = c(0,120),
+           break.x.by = 24,
+           xlab = "Time since surgery (Months)",
+           ylab = "Overall Survival",
+           legend.title = '',
+           ggtheme = theme_classic2(base_size=12, base_family = "Arial"),
+           font.family = "Arial",
+           tables.theme = clean_theme() + 
+             theme(plot.title = element_text(size = 8)))
+```
+
+## Cumulative incidence of recurrence (PSM)
+
+### 5 and 8-year CCI of recurrence (PSM)
+```{r, echo=FALSE}
+cuminc(Surv(os_time_CCI, vital_factor_2) ~ neo_rad1_table, data = matched_data) %>%
+  tbl_cuminc(
+    times = c(60,96),
+    label = "Neoadjuvant RT"
+  ) %>%
+  add_p()
+```
+
+### Plotted CCI curves (PSM)
+```{r, echo=FALSE}
+cuminc(Surv(os_time_CCI, vital_factor_2) ~ neo_rad1_table, data = matched_data) %>% 
+  ggcuminc(outcome = "1") + 
+  labs(
+    x = "Time since surgery (months)",
+    y = "Cumulative incidence of local recurrence (%)"
+  ) + 
+  theme(panel.grid = element_blank()) +
+  add_censor_mark() +
+  scale_y_continuous(limits = c(0, 0.75), labels = scales::percent,  expand = c(0.01,0)) +
+  add_risktable(
+    risktable_stats = "{n.risk} ({n.censor})",
+    stats_label = c("Number at Risk (Censored)")
+  ) +
+  scale_x_continuous(breaks = seq(0,120, by = 24),
+                     limits = c(0,120)) +
+  scale_y_continuous(breaks = seq(0,0.6, by = 0.1),
+                     limits = c(0,0.6))
+```
+
+# 1:2 Propensity Score Matched Data
+```{r, echo = FALSE}
+#create matched object 
+match_obj2 <- matchit(neo_rad1 ~ Age + Gender + Size + Multifocal + Complete_Resection,
+  data = WDLPS2, 
+  method = "nearest", 
+  distance ="glm",
+  ratio = 2,
+  replace = FALSE,
+  caliper = 0.2)
+
+summary(match_obj2)
+
+matched_data2 <- match.data(match_obj2) #create dataset from the matched object
+```
+
+## Logistic regression model using cluster-robust variances
+```{r}
+#Run regression model with recurrence as the outcome, and preoperative radiation as the only predictor
+
+#matched participants have a weight of 1
+m5 <- glm(LR_only ~ neo_rad1, data = matched_data2, weights = weights)
+
+#Test the coefficient using cluster robust standard error
+coeftest(m5, vcov. = vcovCL, cluster = ~subclass)
+
+#Calculate the confidence intervals based on cluster robust standard error
+coefci(m5, vcov. = vcovCL, cluster = ~subclass, level = 0.95)
+
+m5 %>%
+  tbl_regression(exponentiate = TRUE) %>%
+  as_gt()
+```
+
+## Cox model using 1:2
+```{r, echo = FALSE}
+m6 <- coxph(Surv(os_time_mo, vital_num) ~ neo_rad1, data = matched_data2)
+
+m6 %>%
+  tbl_regression(exponentiate = TRUE,
+                 label = neo_rad1 ~ "Neoadjuvant RT") %>%
+  as_gt()
+```
+
+
+## Plots of the 1:2 PSM matching (Supplementary Figure 1 & 2, Table 2)
+```{r, echo=FALSE}
+plot(match_obj2, type = "jitter", interactive = FALSE)
+
+plot(summary(match_obj2), abs = FALSE)
+
+#Univariate table looking at PSM balancing
+matched_data2 %>%
+  select(age_years, Gender1_table, Multifocal, Size, Complete_Resection, LR_only, neo_rad1) %>%
+  tbl_summary(by = neo_rad1,
+              digits = list(all_continuous() ~ 2,
+                            all_categorical() ~ 1),
+              label = list(age_years ~ "Age",
+                           Gender1_table ~ "Gender",
+                           Multifocal ~ "Multifocality",
+                           Size ~ "Tumor Size (cm)",
+                           Complete_Resection ~ "Macroscopic Resection",
+                           LR_only ~ "LR")) %>%
+  add_p(pvalue_fun = ~style_pvalue(.x, digits = 3)) %>%
+  add_overall() %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_spanning_header(c("stat_1", "stat_2") ~ "**Neoadjuvant RT**")
+```
+```{r}
+#Figure Text: Jitter Plot demonstrating individual propensity scores for matched and unmatched patients.  
+
+#Figure Text: Love Plot with standard mean differences (SMDs) of each covariate after propensity score matching (PSM)
+```
+
+
+## 1:2 PSM KM Models
+```{r, include = FALSE, echo=FALSE}
+#kaplan meier object, renamed as km2, using matched data
+km3 <- survfit(Surv(os_time_mo, vital_num) ~ neo_rad1_table, data = matched_data2)
+```
+
+```{r}
+#display median OS (which was not reached)
+print(km3)
+
+#median f/u time
+print(follow_up_time3 <- median(km3$time))
+```
+
+### 5- and 10-year survival (1:2 PSM)
+```{r, echo=FALSE}
+#5 and 10-year survival
+km3 %>%
+  tbl_survfit(
+    times = c(60, 120),
+    label = "Neoadjuvant RT"
+  ) %>%
+  add_p()
+```
+
+### Kaplan Meier plots
+```{r, echo=FALSE}
+#plotted Kaplan meier
+ggsurvplot(km3,
+           legend.labs = c("Neoadjuvant radiotherapy", "Surgery alone"),
+           pval = TRUE,
+           pval.size = 3,
+           conf.int = TRUE, #added confidence interval per reviewer
+           risk.table = "nrisk_cumcensor",
+           risk.table.title = "Number at Risk (Censored)",
+           fontsize = 3,
+           surv.scale = 'percent',
+           xlim = c(0,120),
+           break.x.by = 12,
+           xlab = "Time since surgery (Months)",
+           ylab = "Overall Survival",
+           legend.title = '',
+           ggtheme = theme_classic2(base_size=12, base_family = "Arial"),
+           font.family = "Arial",
+           tables.theme = clean_theme() + 
+             theme(plot.title = element_text(size = 8)))
+```
+#### Median OS for full cohort
+```{r, echo = FALSE}
+#Median for full 2:1 KM cohort
+#no strata
+km4 <- survfit(Surv(os_time_mo, vital_num) ~ 1, data = matched_data2)
+```
+
+```{r}
+#display median OS (which was not reached)
+print(km4)
+
+#median f/u time
+print(follow_up_time4 <- median(km4$time))
+```
+
+
+## Cumulative incidence of recurrence (1:2 PSM)
+
+### 5 and 8-year CCI of recurrence (1:2 PSM)
+```{r, echo=FALSE}
+cuminc(Surv(os_time_CCI, vital_factor_2) ~ neo_rad1_table, data = matched_data2) %>%
+  tbl_cuminc(
+    times = c(60,96),
+    label = "Neoadjuvant RT"
+  ) %>%
+  add_p()
+```
+
+
+### Plotted CIF curves (PSM)
+```{r, echo=FALSE}
+cuminc(Surv(os_time_CCI, vital_factor_2) ~ neo_rad1_table, data = matched_data2) %>% 
+  ggcuminc(outcome = "1") + 
+  labs(
+    x = "Time since surgery (months)",
+    y = "Cumulative incidence of local recurrence (%)"
+  ) + 
+  theme(panel.grid = element_blank()) +
+  add_censor_mark() +
+  add_confidence_interval() + #added confidence intervals per reviewers
+  scale_y_continuous(limits = c(0, 0.5), labels = scales::percent,  expand = c(0.01,0)) +
+  add_risktable(
+    risktable_stats = "{n.risk} ({cum.event})",
+    stats_label = c("Number at Risk (Events)")
+  ) +
+  scale_x_continuous(breaks = seq(0,120, by = 12),
+                     limits = c(0,120)) +
+  scale_y_continuous(breaks = seq(0,0.5, by = 0.1),
+                     limits = c(0,0.5))
+
+```
+
+## Subdistribution Hazards
+
+```{r}
+crr(Surv(os_time_CCI, vital_factor_2) ~ neo_rad1, data = matched_data2) %>%
+  tbl_regression(ex=TRUE)
+```
+
+## Time to Recurrence 2:1 matched cohort
+```{r, echo = FALSE}
+
+recurred <- matched_data2 %>%
+  subset(recur1 == 1) 
+
+#create recurrence time
+recurred <- recurred %>% 
+  mutate(
+    recur_time = 
+      as.numeric((
+        difftime(dor,
+                 dos,
+                 units = "days")) / 365.25)*12)
+
+neorad <- recurred %>%
+  subset(neo_rad1 == 1) 
+
+neorad_TTR <- neorad$recur_time
+
+surg_only <- recurred %>%
+  subset(neo_rad1 == 0)
+
+surg_only_TTR <- surg_only$recur_time
+
+summary(neorad_TTR) #time to recurrence for preoperative RT patients
+
+summary(surg_only_TTR) #time to recurrence for welldiff patients
+
+wilcox.test(neorad_TTR, surg_only_TTR, paired = FALSE)
+```
+
+# Query of local recurrences by date
+```{r}
+cutoff <- as.Date("2010-01-01")
+
+WDLPS <- WDLPS %>%
+  mutate(
+    pre_post_date = ifelse(dos > cutoff, "Post","Pre")
+  )
+
+table(WDLPS$LR_only, WDLPS$pre_post_date)
+
+chisq.test(WDLPS$pre_post_date, WDLPS$LR_only, correct = FALSE)
+```
+
+## CIF curves
+```{r}
+WDLPS <- WDLPS %>%
+  mutate(
+    pre_post_date_CIF = recode(
+      pre_post_date,
+      '1' = 'Pre',
+      '2' = 'Post'))
+
+cuminc(Surv(os_time_CCI, vital_factor_2) ~ pre_post_date_CIF, data = WDLPS) %>% 
+  ggcuminc(outcome = "1") + 
+  labs(
+    x = "Time since surgery (months)",
+    y = "Cumulative incidence of local recurrence (%)"
+  ) + 
+  theme(panel.grid = element_blank()) +
+  add_censor_mark() +
+  scale_y_continuous(limits = c(0, 0.75), labels = scales::percent,  expand = c(0.01,0)) +
+  add_risktable(
+    risktable_stats = "{n.risk} ({n.censor})",
+    stats_label = c("Number at Risk (Censored)")
+  ) +
+  scale_x_continuous(breaks = seq(0,120, by = 24),
+                     limits = c(0,120)) +
+  scale_y_continuous(breaks = seq(0,0.6, by = 0.1),
+                     limits = c(0,0.6))
+```
+
+## 4 and 8 year CIF
+
+```{r}
+cuminc(Surv(os_time_CCI, vital_factor_2) ~ pre_post_date_CIF, data = WDLPS) %>%
+  tbl_cuminc(
+    times = c(48,96),
+    label = "1/1/2010"
+  ) %>%
+  add_p()
+```
+
+# Revisions
+
+## Interaction Plots
+```{r}
+library(Publish)
+
+WDLPSdf <- data.frame(WDLPS)
+WDLPSdf$focal1factor <- as.factor(WDLPSdf$focal1)
+WDLPSdf$Gender1factor <- as.factor(WDLPSdf$Gender1)
+WDLPSdf$neo_rad1factor <- as.factor(WDLPSdf$neo_rad1)
+
+WDLPSdf <- WDLPSdf %>%
+  mutate(
+    age_factor = case_when(
+      age <= 45 ~ "45",
+      age >45 & age <=65 ~ "45-65",
+      age >65 ~ "65+"))
+
+WDLPSdf <- WDLPSdf %>%
+  mutate(
+    size_factor = case_when(
+      size <= 10 ~ "10",
+      size >10 & size <=20 ~ "10-20",
+      size >20 ~ "20+"))
+
+WDLPSdf$age_factor <- as.factor(WDLPSdf$age_factor)
+WDLPSdf$size_factor <- as.factor(WDLPSdf$size_factor)
+
+m7 <- coxph(Surv(os_time_mo, vital_num) ~ Gender1factor + focal1factor + age_factor + size_factor + neo_rad1factor, data = WDLPSdf)
+
+
+subgroupAnalysis(
+  m7,
+  data = WDLPSdf,
+  treatment = "neo_rad1factor",
+  subgroups = c("focal1factor", "Gender1factor", "age_factor", "size_factor")
+)
+
+```
+
+## Missing Data
+```{r}
+sum(is.na(WDLPS$age))
+sum(is.na(WDLPS$Gender1))
+sum(is.na(WDLPS$size))
+sum(is.na(WDLPS$focal1))
+sum(is.na(WDLPS$resect1))
+```
+
+## Checking proportional hazards assumption
+
+```{r}
+test.ph <- cox.zph(m6)
+test.ph
+
+plot(test.ph)
+```
